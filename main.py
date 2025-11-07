@@ -76,14 +76,17 @@ async def download_line_content(message_id: str, file_name: str) -> Optional[Pat
         # Get message content from LINE
         message_content = await line_bot_api.get_message_content(message_id)
 
-        # Save to local file
-        file_path = UPLOAD_DIR / f"{message_id}_{file_name}"
+        # Extract file extension from original file name
+        _, ext = os.path.splitext(file_name)
+        # Use safe file name (ASCII only) to avoid encoding issues
+        safe_file_name = f"{message_id}{ext}"
+        file_path = UPLOAD_DIR / safe_file_name
 
         async with aiofiles.open(file_path, 'wb') as f:
             async for chunk in message_content.iter_content():
                 await f.write(chunk)
 
-        print(f"Downloaded file: {file_path}")
+        print(f"Downloaded file: {file_path} (original: {file_name})")
         return file_path
     except Exception as e:
         print(f"Error downloading file: {e}")
@@ -96,14 +99,11 @@ async def upload_to_file_search_store(file_path: Path, store_name: str, display_
     Returns True if successful, False otherwise.
     """
     try:
-        # Prepare config if display_name is provided
-        config_dict = {"display_name": display_name} if display_name else None
-
         # Upload file to file search store
+        # Note: Not using display_name in config to avoid encoding issues with Chinese characters
         operation = client.file_search_stores.upload_to_file_search_store(
             file_search_store_name=store_name,
-            file=str(file_path),
-            config=config_dict
+            file=str(file_path)
         )
 
         # Wait for operation to complete (with timeout)

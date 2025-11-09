@@ -4,6 +4,7 @@ import sys
 import asyncio
 import aiohttp
 import aiofiles
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -53,6 +54,14 @@ parser = WebhookParser(channel_secret)
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Create data directory for persistent storage
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+
+# JSON file paths for persistent storage
+USER_PROFILES_FILE = DATA_DIR / "user_profiles.json"
+USER_MODES_FILE = DATA_DIR / "user_modes.json"
+
 # Model configuration
 MODEL_NAME = "gemini-2.5-flash"
 
@@ -67,7 +76,78 @@ user_modes = {}
 user_profiles = {}
 
 # Onboarding state: {user_id: {"step": int, "data": {}}}
+# Note: onboarding_state is not persisted as it's temporary session data
 onboarding_state = {}
+
+
+# ========== Persistent Storage Functions ==========
+
+def load_user_data():
+    """
+    從 JSON 檔案載入使用者資料
+    在應用程式啟動時自動執行
+    """
+    global user_profiles, user_modes
+
+    # Load user profiles
+    if USER_PROFILES_FILE.exists():
+        try:
+            with open(USER_PROFILES_FILE, 'r', encoding='utf-8') as f:
+                user_profiles = json.load(f)
+            print(f"✅ Loaded {len(user_profiles)} user profiles from {USER_PROFILES_FILE}")
+        except Exception as e:
+            print(f"❌ Error loading user profiles: {e}")
+            user_profiles = {}
+    else:
+        print(f"ℹ️ No existing user profiles file found, starting fresh")
+        user_profiles = {}
+
+    # Load user modes
+    if USER_MODES_FILE.exists():
+        try:
+            with open(USER_MODES_FILE, 'r', encoding='utf-8') as f:
+                user_modes = json.load(f)
+            print(f"✅ Loaded {len(user_modes)} user modes from {USER_MODES_FILE}")
+        except Exception as e:
+            print(f"❌ Error loading user modes: {e}")
+            user_modes = {}
+    else:
+        print(f"ℹ️ No existing user modes file found, starting fresh")
+        user_modes = {}
+
+
+def save_user_profiles():
+    """
+    將使用者個人資料儲存到 JSON 檔案
+    每次更新使用者資料時自動執行
+    """
+    try:
+        with open(USER_PROFILES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(user_profiles, f, ensure_ascii=False, indent=2)
+        print(f"💾 Saved {len(user_profiles)} user profiles to {USER_PROFILES_FILE}")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving user profiles: {e}")
+        return False
+
+
+def save_user_modes():
+    """
+    將使用者模式設定儲存到 JSON 檔案
+    每次切換模式時自動執行
+    """
+    try:
+        with open(USER_MODES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(user_modes, f, ensure_ascii=False, indent=2)
+        print(f"💾 Saved {len(user_modes)} user modes to {USER_MODES_FILE}")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving user modes: {e}")
+        return False
+
+
+# Load user data on startup
+load_user_data()
 
 def get_user_id(event: MessageEvent) -> str:
     """取得使用者 ID"""
@@ -83,8 +163,9 @@ def get_user_mode(user_id: str) -> str:
 
 
 def set_user_mode(user_id: str, mode: str):
-    """設定使用者模式"""
+    """設定使用者模式並自動儲存"""
     user_modes[user_id] = mode
+    save_user_modes()  # 自動儲存到 JSON 檔案
 
 
 def get_user_profile(user_id: str) -> dict:
@@ -93,8 +174,9 @@ def get_user_profile(user_id: str) -> dict:
 
 
 def set_user_profile(user_id: str, profile: dict):
-    """設定使用者資料"""
+    """設定使用者資料並自動儲存"""
     user_profiles[user_id] = profile
+    save_user_profiles()  # 自動儲存到 JSON 檔案
 
 
 def is_user_profile_complete(user_id: str) -> bool:

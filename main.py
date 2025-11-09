@@ -408,8 +408,51 @@ async def upload_to_file_search_store(file_path: Path, store_name: str, display_
 def clean_markdown(text: str) -> str:
     """
     移除 Markdown 格式符號，讓訊息在 LINE 中更易讀
+    同時在主要標題前加入 emoji 圖示增加閱讀舒適度
     """
     import re
+
+    # 定義標題關鍵字與對應的 emoji（僅用於主要大標題 # 或 ##）
+    heading_emoji_map = {
+        # 糖尿病相關
+        r'(血糖|血糖控制|監測血糖)': '🩸',
+        r'(飲食|營養|食物|餐食|進食)': '🍽️',
+        r'(運動|活動|體能|鍛鍊)': '🏃',
+        r'(藥物|用藥|胰島素|藥品|治療)': '💊',
+        r'(併發症|病變|風險)': '⚠️',
+        r'(症狀|徵兆|表現)': '🔍',
+        r'(預防|照護|保健|管理)': '🛡️',
+        r'(檢查|檢測|診斷|評估)': '🔬',
+        r'(生活|日常|習慣)': '🏠',
+        r'(注意|提醒|警告|重要)': '⚡',
+        r'(建議|方法|步驟|如何)': '💡',
+        r'(總結|結論|摘要)': '📋',
+        r'(定義|什麼是|介紹)': '📖',
+        r'(原因|為什麼|機制)': '🔎',
+    }
+
+    # 先處理標題：移除 # 符號並根據內容添加適當的 emoji（僅 # 和 ## 主標題）
+    def add_emoji_to_heading(match):
+        level = len(match.group(1))  # 標題層級 (# 的數量)
+        title = match.group(2).strip()
+
+        # 只為主要標題（# 或 ##）添加 emoji
+        if level <= 2:
+            # 檢查標題內容，匹配適當的 emoji
+            for pattern, emoji in heading_emoji_map.items():
+                if re.search(pattern, title, re.IGNORECASE):
+                    return f'{emoji} {title}'
+            # 如果沒有匹配到特定類別，使用通用 emoji
+            if level == 1:
+                return f'📌 {title}'  # 最大標題使用 📌
+            else:
+                return f'▸ {title}'   # 次級標題使用 ▸
+        else:
+            # ### 以下的小標題不加 emoji，保持簡潔
+            return title
+
+    # 處理 Markdown 標題
+    text = re.sub(r'^(#{1,6})\s+(.+)$', add_emoji_to_heading, text, flags=re.MULTILINE)
 
     # 移除粗體標記 **text** 或 __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
@@ -424,9 +467,6 @@ def clean_markdown(text: str) -> str:
 
     # 移除行內程式碼標記 `text`
     text = re.sub(r'`(.+?)`', r'\1', text)
-
-    # 移除標題符號 # ## ### 等
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
 
     # 移除連結 [text](url) 保留文字
     text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)

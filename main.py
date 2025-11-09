@@ -836,7 +836,7 @@ def start_onboarding(user_id: str):
 def get_onboarding_question(step: int) -> str:
     """取得 onboarding 問題"""
     questions = {
-        1: "👋 您好！為了提供更個人化的衛教建議，請問我該如何稱呼您？\n（例如：王先生、小美、張媽媽）",
+        1: "👋 您好！為了提供更個人化的衛教建議，請問我該如何稱呼您？\n（例如：王先生、小美、張媽媽）\n\n💡 快速設定：您也可以一次輸入完整資料，例如：\n「王先生，65歲，男性，第2型糖尿病，有視網膜病變，大學，使用Metformin」",
         2: "請問您的年齡是？\n（請輸入數字，例如：45）",
         3: "請問您的性別是？\n（請輸入：男性 或 女性）",
         4: "請問您的糖尿病類型是？\n請選擇：\n1. 第1型糖尿病\n2. 第2型糖尿病\n3. 妊娠糖尿病\n4. 其他類型",
@@ -845,6 +845,92 @@ def get_onboarding_question(step: int) -> str:
         7: "最後一個問題：您目前有在使用哪些藥物嗎？（可選填）\n（請輸入藥名，用逗號分隔，或輸入「無」）"
     }
     return questions.get(step, "")
+
+
+async def parse_complete_profile(user_input: str) -> dict:
+    """
+    使用 Gemini 智能解析使用者一次性輸入的完整個人資料
+
+    範例輸入：
+    - "曾先生，75歲，國小，第二型糖尿病，有糖尿病的心臟和腎臟的併發症，目前使用胰島素治療"
+    - "王小姐 32歲 女 第1型 無併發症 研究所畢業 長效胰島素"
+
+    Returns:
+        dict: 解析出的個人資料，如果無法解析則返回 None
+    """
+    try:
+        # 使用 Gemini 解析自然語言輸入
+        prompt = f"""請從以下使用者輸入中，提取糖尿病患者的個人資料。
+
+使用者輸入：
+{user_input}
+
+請以 JSON 格式返回，包含以下欄位（如果有的話）：
+- name: 稱呼（例如：王先生、李小姐）
+- age: 年齡（數字字串）
+- gender: 性別（"男性" 或 "女性"）
+- diabetes_type: 糖尿病類型（"第1型"、"第2型"、"妊娠糖尿病" 或 "其他"）
+- complications: 併發症列表（陣列，可能包含："視網膜病變"、"腎臟病變"、"神經病變"、"心血管疾病"、"足部病變"）
+- education_level: 教育程度（"國小"、"國中"、"高中/職"、"大學"、"研究所"）
+- current_medications: 目前用藥（陣列，藥物名稱）
+
+注意事項：
+1. 只返回 JSON 格式，不要有其他文字
+2. 如果某個欄位無法確定，請省略該欄位
+3. 年齡請轉換為數字字串
+4. 性別請統一為"男性"或"女性"（即使輸入是"男"或"女"）
+5. 糖尿病類型請統一格式："第1型"、"第2型"等
+6. 併發症關鍵字：心臟→心血管疾病、腎臟→腎臟病變、眼睛/視力→視網膜病變、神經→神經病變、足部/腳→足部病變
+7. 教育程度簡寫：國小、國中、高中、大學、研究所
+
+範例：
+輸入："曾先生，75歲，國小，第二型糖尿病，有心臟和腎臟併發症，使用胰島素"
+輸出：
+{{
+  "name": "曾先生",
+  "age": "75",
+  "gender": "男性",
+  "diabetes_type": "第2型",
+  "complications": ["心血管疾病", "腎臟病變"],
+  "education_level": "國小",
+  "current_medications": ["胰島素"]
+}}
+
+現在請解析上述使用者輸入："""
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,  # 低溫度以獲得更精確的解析
+            )
+        )
+
+        if response.text:
+            # 清理可能的 markdown 代碼塊標記
+            import re
+            json_text = response.text.strip()
+            json_text = re.sub(r'^```json\s*', '', json_text)
+            json_text = re.sub(r'^```\s*', '', json_text)
+            json_text = re.sub(r'\s*```$', '', json_text)
+
+            # 解析 JSON
+            parsed_data = json.loads(json_text)
+
+            # 驗證至少包含基本資料
+            if parsed_data and ('name' in parsed_data or 'age' in parsed_data):
+                print(f"✅ Successfully parsed profile: {parsed_data}")
+                return parsed_data
+            else:
+                print(f"❌ Parsed data missing essential fields: {parsed_data}")
+                return None
+        else:
+            print("❌ No response from Gemini")
+            return None
+
+    except Exception as e:
+        print(f"❌ Error parsing complete profile: {e}")
+        return None
 
 
 async def process_onboarding_answer(user_id: str, answer: str) -> str:
@@ -857,7 +943,50 @@ async def process_onboarding_answer(user_id: str, answer: str) -> str:
     data = state["data"]
 
     # 處理不同步驟的回答
-    if step == 1:  # 稱呼
+    if step == 1:  # 稱呼（或完整資料）
+        # 嘗試智能解析完整資料
+        # 判斷是否可能包含完整資料（長度 > 20 字元，包含逗號或多個資訊）
+        if len(answer.strip()) > 20 or '，' in answer or ',' in answer or '歲' in answer:
+            print(f"🔍 Attempting to parse complete profile from: {answer}")
+            parsed_profile = await parse_complete_profile(answer)
+
+            if parsed_profile and len(parsed_profile) >= 3:  # 至少有 3 個欄位
+                # 成功解析完整資料！
+                # 填充缺失的欄位為空值
+                complete_profile = {
+                    'name': parsed_profile.get('name', ''),
+                    'age': parsed_profile.get('age', ''),
+                    'gender': parsed_profile.get('gender', ''),
+                    'diabetes_type': parsed_profile.get('diabetes_type', ''),
+                    'complications': parsed_profile.get('complications', []),
+                    'education_level': parsed_profile.get('education_level', ''),
+                    'current_medications': parsed_profile.get('current_medications', [])
+                }
+
+                # 儲存完整資料
+                set_user_profile(user_id, complete_profile)
+                del onboarding_state[user_id]
+
+                # 建立確認訊息
+                summary = f"""✅ 太好了！我已經成功辨識您的資料！
+
+【您的個人資料】
+• 稱呼：{complete_profile['name'] or '未提供'}
+• 年齡：{complete_profile['age'] + '歲' if complete_profile['age'] else '未提供'}
+• 性別：{complete_profile['gender'] or '未提供'}
+• 糖尿病類型：{complete_profile['diabetes_type'] or '未提供'}
+• 併發症：{', '.join(complete_profile['complications']) if complete_profile['complications'] else '無或未提供'}
+• 教育程度：{complete_profile['education_level'] or '未提供'}
+• 目前用藥：{', '.join(complete_profile['current_medications']) if complete_profile['current_medications'] else '無或未提供'}
+
+現在我會根據您的個人資料提供更適合您的衛教建議！
+
+💡 如需修改資料，隨時輸入「更新資料」即可重新設定。
+
+現在就開始提問吧！😊"""
+                return summary
+
+        # 如果無法解析完整資料，按照正常流程處理（只儲存稱呼）
         data['name'] = answer.strip()
         state["step"] = 2
         return f"很高興認識您，{data['name']}！\n\n{get_onboarding_question(2)}"

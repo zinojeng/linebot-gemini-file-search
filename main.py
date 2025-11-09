@@ -315,10 +315,65 @@ async def upload_to_file_search_store(file_path: Path, store_name: str, display_
         return False
 
 
+def clean_markdown(text: str) -> str:
+    """
+    移除 Markdown 格式符號，讓訊息在 LINE 中更易讀
+    """
+    import re
+
+    # 移除粗體標記 **text** 或 __text__
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+
+    # 移除斜體標記 *text* 或 _text_
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'_(.+?)_', r'\1', text)
+
+    # 移除刪除線 ~~text~~
+    text = re.sub(r'~~(.+?)~~', r'\1', text)
+
+    # 移除行內程式碼標記 `text`
+    text = re.sub(r'`(.+?)`', r'\1', text)
+
+    # 移除標題符號 # ## ### 等
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+
+    # 移除連結 [text](url) 保留文字
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+
+    # 移除圖片 ![alt](url)
+    text = re.sub(r'!\[.+?\]\(.+?\)', '', text)
+
+    # 移除程式碼區塊標記 ```
+    text = re.sub(r'```[\w]*\n', '', text)
+    text = re.sub(r'```', '', text)
+
+    # 移除引用標記 >
+    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+
+    # 移除水平線 --- 或 ***
+    text = re.sub(r'^(\*{3,}|-{3,}|_{3,})$', '', text, flags=re.MULTILINE)
+
+    # 清理列表項目符號（保留結構但美化）
+    # 無序列表 - * +
+    text = re.sub(r'^\s*[-*+]\s+', '• ', text, flags=re.MULTILINE)
+
+    # 有序列表 1. 2. 3.
+    # 保持原樣，因為數字編號在 LINE 中也很清楚
+
+    # 移除多餘空行（超過兩個連續空行）
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # 移除前後空白
+    text = text.strip()
+
+    return text
+
+
 async def query_file_search(query: str, store_name: str) -> str:
     """
     Query the file search store using generate_content.
-    Returns the AI response text.
+    Returns the AI response text (cleaned from markdown).
     """
     try:
         # Get actual store name from cache or by searching
@@ -364,7 +419,9 @@ async def query_file_search(query: str, store_name: str) -> str:
 
         # Extract text from response
         if response.text:
-            return response.text
+            # 清理 Markdown 符號，讓訊息在 LINE 中更易讀
+            cleaned_text = clean_markdown(response.text)
+            return cleaned_text
         else:
             return "抱歉，我無法從文件中找到相關資訊。"
 
@@ -410,7 +467,9 @@ async def analyze_image_with_gemini(image_path: Path) -> str:
         )
 
         if response.text:
-            return response.text
+            # 清理 Markdown 符號
+            cleaned_text = clean_markdown(response.text)
+            return cleaned_text
         else:
             return "抱歉，我無法分析這張圖片。"
 
